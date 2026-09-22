@@ -56,7 +56,7 @@ export class ComputedFieldCascadeAfterSchemaUpdate {
     context: IExecutionContext,
     input: CascadeInput
   ): Promise<Result<void, DomainError>> {
-    const service = this;
+    const service = this; // NOSONAR typescript:S7740 -- generator functions cannot be arrow functions, so `this` must be captured
     return safeTry<void, DomainError>(async function* () {
       const {
         table,

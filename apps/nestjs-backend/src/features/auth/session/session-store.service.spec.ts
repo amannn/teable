@@ -235,7 +235,7 @@ describe('SessionStoreService', () => {
       // Mock the necessary methods
       vitest.spyOn(sessionStoreService as any, 'getCache').mockResolvedValueOnce(sessionData);
 
-      await sessionStoreService.get(sid, callbackMock);
+      await sessionStoreService.getAsync(sid, callbackMock);
 
       // Verify that getCache method was called with the expected parameter
       expect(sessionStoreService['getCache']).toHaveBeenCalledWith(sid);
@@ -249,7 +249,7 @@ describe('SessionStoreService', () => {
       // Mock the necessary methods
       vitest.spyOn(sessionStoreService as any, 'getCache').mockRejectedValueOnce(error);
 
-      await sessionStoreService.get(sid, callbackMock);
+      await sessionStoreService.getAsync(sid, callbackMock);
 
       // Verify that getCache method was called with the expected parameter
       expect(sessionStoreService['getCache']).toHaveBeenCalledWith(sid);
@@ -269,7 +269,7 @@ describe('SessionStoreService', () => {
       // Mock the necessary methods
       vitest.spyOn(sessionStoreService as any, 'setCache').mockResolvedValueOnce(true);
 
-      await sessionStoreService.set(sid, sessionData, callbackMock);
+      await sessionStoreService.setAsync(sid, sessionData, callbackMock);
 
       // Verify that setCache method was called with the expected parameters
       expect(sessionStoreService['setCache']).toHaveBeenCalledWith(sid, sessionData);
@@ -283,7 +283,7 @@ describe('SessionStoreService', () => {
       // Mock the necessary methods
       vitest.spyOn(sessionStoreService as any, 'setCache').mockRejectedValueOnce(error);
 
-      await sessionStoreService.set(sid, sessionData, callbackMock);
+      await sessionStoreService.setAsync(sid, sessionData, callbackMock);
 
       // Verify that setCache method was called with the expected parameters
       expect(sessionStoreService['setCache']).toHaveBeenCalledWith(sid, sessionData);
@@ -297,7 +297,7 @@ describe('SessionStoreService', () => {
       // Mock the necessary methods
       cacheService.del.mockResolvedValueOnce(true);
 
-      await sessionStoreService.destroy(sid, callbackMock);
+      await sessionStoreService.destroyAsync(sid, callbackMock);
 
       // Verify that cacheService.del method was called with the expected parameter
       expect(cacheService.del).toHaveBeenCalledWith(`auth:session-store:${sid}`);
@@ -311,7 +311,7 @@ describe('SessionStoreService', () => {
       // Mock the necessary methods
       cacheService.del.mockRejectedValueOnce(error);
 
-      await sessionStoreService.destroy(sid, callbackMock);
+      await sessionStoreService.destroyAsync(sid, callbackMock);
 
       // Verify that cacheService.del method was called with the expected parameter
       expect(cacheService.del).toHaveBeenCalledWith(`auth:session-store:${sid}`);
@@ -325,7 +325,7 @@ describe('SessionStoreService', () => {
       vitest.spyOn(sessionStoreService as any, 'getCache').mockResolvedValueOnce(sessionData);
       vitest.spyOn(sessionStoreService as any, 'setCache').mockResolvedValueOnce(null);
 
-      await sessionStoreService.touch(sid, sessionData, callbackMock);
+      await sessionStoreService.touchAsync(sid, sessionData, callbackMock);
 
       // Verify that getCache and set methods were called with the expected parameters
       expect(sessionStoreService['getCache']).toHaveBeenCalledWith(sid);
@@ -340,7 +340,7 @@ describe('SessionStoreService', () => {
       // Mock the necessary methods
       vitest.spyOn(sessionStoreService as any, 'getCache').mockResolvedValueOnce(undefined);
 
-      await sessionStoreService.touch(sid, sessionData, callbackMock);
+      await sessionStoreService.touchAsync(sid, sessionData, callbackMock);
 
       // Verify that getCache method was called with the expected parameter
       expect(sessionStoreService['getCache']).toHaveBeenCalledWith(sid);
@@ -354,7 +354,7 @@ describe('SessionStoreService', () => {
       // Mock the necessary methods
       vitest.spyOn(sessionStoreService as any, 'getCache').mockRejectedValueOnce(error);
 
-      await sessionStoreService.touch(sid, sessionData, callbackMock);
+      await sessionStoreService.touchAsync(sid, sessionData, callbackMock);
 
       // Verify that getCache method was called with the expected parameter
       expect(sessionStoreService['getCache']).toHaveBeenCalledWith(sid);

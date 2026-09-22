@@ -3,6 +3,7 @@ export enum Events {
   SPACE_CREATE = 'space.create',
   SPACE_DELETE = 'space.delete',
   SPACE_UPDATE = 'space.update',
+  SPACE_SIGNUP_CREATE = 'space.signup.create',
 
   BASE_CREATE = 'base.create',
   BASE_DELETE = 'base.delete',
@@ -101,6 +102,10 @@ export enum Events {
   APP_CREATE = 'app.create',
   APP_DELETE = 'app.delete',
   APP_UPDATE = 'app.update',
+
+  ROUTINE_CREATE = 'agent.routine.create',
+  ROUTINE_DELETE = 'agent.routine.delete',
+  ROUTINE_UPDATE = 'agent.routine.update',
 
   CROP_IMAGE = 'crop.image',
   CROP_IMAGE_COMPLETE = 'crop.image.complete',

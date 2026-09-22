@@ -164,7 +164,7 @@ export class InvitationService {
     });
 
     const noExistEmails = invitationEmails.filter(
-      (email) => !sendUsers.find((u) => u.email.toLowerCase() === email.toLowerCase())
+      (email) => !sendUsers.some((u) => u.email.toLowerCase() === email.toLowerCase())
     );
 
     const invitees: ICollaboratorInvitee[] = [];
@@ -275,7 +275,7 @@ export class InvitationService {
       where: { id: baseId, deletedTime: null },
     });
     if (!base) {
-      throw new CustomHttpException('Base not found', HttpErrorCode.NOT_FOUND, {
+      throw new CustomHttpException('Project not found', HttpErrorCode.NOT_FOUND, {
         localization: {
           i18nKey: 'httpErrors.base.notFound',
         },
@@ -498,7 +498,7 @@ export class InvitationService {
           where: { id: baseId, deletedTime: null },
         })
         .catch(() => {
-          throw new CustomHttpException('Base not found', HttpErrorCode.NOT_FOUND, {
+          throw new CustomHttpException('Project not found', HttpErrorCode.NOT_FOUND, {
             localization: {
               i18nKey: 'httpErrors.base.notFound',
             },

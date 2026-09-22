@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable sonarjs/no-duplicate-string */
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { cliOAuthApp, HttpError } from '@teable/core';
 import {

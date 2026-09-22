@@ -97,7 +97,7 @@ export class OAuthServerService {
     );
   }
 
-  private handleError(error: unknown | undefined) {
+  private handleError(error: unknown) {
     if (error instanceof AuthorizationError) {
       return new HttpException(error.message, Number(error.status));
     }
@@ -139,7 +139,10 @@ export class OAuthServerService {
     throw new UnauthorizedException('Invalid redirectUri');
   }
 
-  private authorizeValidate: ValidateFunctionArity2<IAuthorizeClient> = async (areq, done) => {
+  private readonly authorizeValidate: ValidateFunctionArity2<IAuthorizeClient> = async (
+    areq,
+    done
+  ) => {
     const {
       clientID: clientId,
       redirectURI,
@@ -197,7 +200,7 @@ export class OAuthServerService {
     }
   };
 
-  private authorizeImmediate: ImmediateFunction<IAuthorizeClient> = async (
+  private readonly authorizeImmediate: ImmediateFunction<IAuthorizeClient> = async (
     client,
     user,
     _scope,
@@ -259,7 +262,11 @@ export class OAuthServerService {
     });
   }
 
-  private decisionComplete = async (_req: unknown, oauth2: OAuth2, cb: (err?: unknown) => void) => {
+  private readonly decisionComplete = async (
+    _req: unknown,
+    oauth2: OAuth2,
+    cb: (err?: unknown) => void
+  ) => {
     // complete the transaction
     await this.touchAuthorize(oauth2.req.clientID, oauth2.user.id)
       .then(() => cb())
@@ -343,7 +350,13 @@ export class OAuthServerService {
     });
   }
 
-  private codeGrant: IssueGrantCodeFunction = async (client, _redirectUri, user, _ares, done) => {
+  private readonly codeGrant: IssueGrantCodeFunction = async (
+    client,
+    _redirectUri,
+    user,
+    _ares,
+    done
+  ) => {
     const { clientId } = await this.getOAuthApp(client.clientId);
     const code = getRandomString(16);
     // save code
@@ -384,10 +397,13 @@ export class OAuthServerService {
   }
 
   private getRefreshToken(client: ITokenClient, accessTokenId: string, sign: string) {
+    // Confidential clients are bound to the secret row, not to the secret hash:
+    // a JWT payload is readable by whoever holds the refresh token. Deleting
+    // that secret still invalidates every refresh token issued under it.
     const payload =
       client.type === 'pkce'
         ? { clientId: client.clientId, accessTokenId, sign }
-        : { clientId: client.clientId, secret: client.clientSecret, accessTokenId, sign };
+        : { clientId: client.clientId, secretId: client.secretId, accessTokenId, sign };
     return this.jwtService.signAsync(payload, {
       expiresIn: this.oauth2Config.refreshTokenExpireIn,
     });
@@ -439,7 +455,7 @@ export class OAuthServerService {
    * once someone approved the user code in a browser, and with the spec's error
    * codes until then — `authorization_pending` is the normal case, not a fault.
    */
-  private deviceCodeExchange = async (
+  private readonly deviceCodeExchange = async (
     req: Request,
     res: Response,
     next: (err?: unknown) => void
@@ -546,7 +562,12 @@ export class OAuthServerService {
     }
   }
 
-  private codeExchange: IssueExchangeCodeFunction = async (client, code, redirectUri, done) => {
+  private readonly codeExchange: IssueExchangeCodeFunction = async (
+    client,
+    code,
+    redirectUri,
+    done
+  ) => {
     const completeExchange = await this.prismaService
       .$tx(async () => {
         const codeState = await this.cacheService.get(`oauth:code:${code}`);
@@ -585,7 +606,7 @@ export class OAuthServerService {
     return completeExchange();
   };
 
-  private refreshTokenExchange: (
+  private readonly refreshTokenExchange: (
     client: ITokenClient,
     refreshToken: string,
     issued: ExchangeDoneFunction
@@ -594,6 +615,9 @@ export class OAuthServerService {
       .$tx(async () => {
         const decoded = await this.jwtService.verifyAsync<{
           clientId: string;
+          secretId?: string;
+          // Refresh tokens issued before `secretId` carry the secret hash; they
+          // stay valid until they expire (refreshTokenExpireIn).
           secret?: string;
           accessTokenId: string;
           sign: string;
@@ -602,7 +626,13 @@ export class OAuthServerService {
         if (client.clientId !== decoded.clientId) {
           return () => done(new UnauthorizedException('Invalid client'));
         }
-        if ((client as ITokenClient & { clientSecret?: string })?.clientSecret !== decoded.secret) {
+        // PKCE tokens carry neither field and must only be honored by a PKCE
+        // client (whose clientSecret is undefined), and vice versa.
+        const boundToClient =
+          decoded.secretId !== undefined
+            ? decoded.secretId === client.secretId
+            : decoded.secret === (client as { clientSecret?: string }).clientSecret;
+        if (!boundToClient) {
           return () => done(new UnauthorizedException('Invalid secret'));
         }
 
@@ -670,11 +700,13 @@ export class OAuthServerService {
   };
 
   async getDecisionInfo(req: Request, transactionId: string) {
+    // Express 5 leaves req.body undefined on GET requests (no body parser ran).
+    req.body ??= {};
     req.body['transaction_id'] = transactionId;
     return new Promise<DecisionInfoGetVo>((resolve, reject) => {
       this.oauthTxStore.load(req, async (err, txn) => {
         if (err) {
-          reject(err);
+          reject(err instanceof Error ? err : new Error(String(err)));
         } else {
           const clientId = txn!.req.clientID;
           const oauthApp = await this.getOAuthApp(clientId);

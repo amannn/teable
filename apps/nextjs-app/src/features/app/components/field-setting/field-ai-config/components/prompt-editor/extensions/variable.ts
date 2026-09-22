@@ -17,8 +17,8 @@ export class FieldVariable extends WidgetType {
     const container = document.createElement('span');
     container.className =
       'inline-flex h-5 items-center gap-1 rounded bg-violet-50 px-1.5 text-xs text-violet-500 cursor-default select-none hover:bg-violet-100 mx-1';
-    container.setAttribute('data-field-id', this.fieldId);
-    container.setAttribute('data-field-range', `${this.from},${this.to}`);
+    container.dataset.fieldId = this.fieldId;
+    container.dataset.fieldRange = `${this.from},${this.to}`;
     container.style.verticalAlign = 'middle';
 
     const textSpan = document.createElement('span');

@@ -61,7 +61,7 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
       }
       await this.userService.refreshLastSignTime(user.id);
       return pickUserMe(user);
-    } catch (error) {
+    } catch {
       const { maxLoginAttempts, accountLockoutMinutes } = this.authConfig.signin;
       const hasLockout = maxLoginAttempts && accountLockoutMinutes;
       const isLockout = await this.cacheService.get(`signin:lockout:${email}`);

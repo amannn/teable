@@ -286,7 +286,7 @@ export const ShareViewContent: React.FC = () => {
   };
 
   const confirmSharePassword = async () => {
-    await setShareMeta({ password: sharePassword });
+    setShareMeta({ password: sharePassword });
     setShowPasswordDialog(false);
     setSharePassword('');
   };

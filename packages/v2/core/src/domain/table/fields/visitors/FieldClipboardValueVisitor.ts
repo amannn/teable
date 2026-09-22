@@ -340,7 +340,7 @@ export const stringifyClipboardRows = (rows: ReadonlyArray<ReadonlyArray<string>
     .map((row) =>
       row
         .map((cell) =>
-          cell.includes('\t') || cell.includes('\n') ? `"${cell.replace(/"/g, '""')}"` : cell
+          cell.includes('\t') || cell.includes('\n') ? `"${cell.replaceAll('"', '""')}"` : cell
         )
         .join('\t')
     )

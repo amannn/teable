@@ -138,6 +138,71 @@ describe('SettingOpenApiService', () => {
       },
     });
   });
+
+  it('restores the provider-list invariant when updating a partial AI config', async () => {
+    const settingService = {
+      getSetting: vi.fn().mockResolvedValue({
+        aiConfig: { capabilities: { disableActions: [] } },
+      }),
+      updateSetting: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = createServiceWithSettingService(settingService);
+
+    await service.updateAiConfig({
+      section: 'capabilities',
+      patch: { capabilities: { disableActions: ['chat'] } },
+    });
+
+    expect(settingService.updateSetting).toHaveBeenCalledWith({
+      aiConfig: {
+        capabilities: { disableActions: ['chat'] },
+        llmProviders: [],
+      },
+    });
+  });
+
+  it('refuses a provider list where two providers of one type list the same model', async () => {
+    const settingService = {
+      getSetting: vi.fn().mockResolvedValue({ aiConfig: { llmProviders: [] } }),
+      updateSetting: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = createServiceWithSettingService(settingService);
+
+    await expect(
+      service.updateAiConfig({
+        section: 'llmApi',
+        patch: {
+          llmProviders: [
+            { type: LLMProviderType.OPENAI, name: 'a', displayName: 'GPT', models: 'gpt-4o' },
+            { type: LLMProviderType.OPENAI, name: 'b', displayName: 'Mirror', models: 'gpt-4o' },
+          ],
+        },
+      })
+    ).rejects.toThrow('listed by both "GPT" and "Mirror"');
+    expect(settingService.updateSetting).not.toHaveBeenCalled();
+  });
+
+  it('normalizes a null provider-list patch to an empty list', async () => {
+    const settingService = {
+      getSetting: vi.fn().mockResolvedValue({
+        aiConfig: {
+          llmProviders: [{ type: LLMProviderType.OPENAI, name: 'teable', models: 'gpt-4o' }],
+        },
+      }),
+      updateSetting: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = createServiceWithSettingService(settingService);
+
+    const result = await service.updateAiConfig({
+      section: 'llmApi',
+      patch: { llmProviders: null },
+    });
+
+    expect(settingService.updateSetting).toHaveBeenCalledWith({
+      aiConfig: { llmProviders: [] },
+    });
+    expect(result).toEqual({ aiConfig: { llmProviders: [] } });
+  });
 });
 
 describe('SettingOpenApiService.testLLM image generation', () => {

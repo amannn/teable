@@ -1,5 +1,5 @@
-import https from 'https';
-import { join } from 'path';
+import https from 'node:https';
+import { join } from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
 import {
   generateAccountId,
@@ -20,7 +20,7 @@ import { CacheService } from '../../cache/cache.service';
 import { BaseConfig, IBaseConfig } from '../../configs/base.config';
 import { CustomHttpException } from '../../custom.exception';
 import { EventEmitterService } from '../../event-emitter/event-emitter.service';
-import { Events } from '../../event-emitter/events';
+import { Events, SpaceSignupCreateEvent } from '../../event-emitter/events';
 import { UserSignUpEvent } from '../../event-emitter/events/user/user.event';
 import type { IClsStore } from '../../types/cls';
 import { AVATAR_OUTPUT_MIMETYPE, AVATAR_SIZE, cropSquareAvatarImage } from '../../utils/avatar';
@@ -87,6 +87,17 @@ export class UserService {
     });
   }
 
+  /**
+   * The user an OAuth account is linked to, by the provider's own subject id. The identity
+   * an identity provider guarantees is this pair; an email is an optional profile field.
+   */
+  async getUserByAccount(provider: string, providerId: string) {
+    const account = await this.prismaService.txClient().account.findFirst({
+      where: { provider, providerId },
+    });
+    return account ? await this.getUserById(account.userId) : undefined;
+  }
+
   async createSpaceBySignup(createSpaceRo: ICreateSpaceRo) {
     const userId = this.cls.get('user.id');
     const uniqName = createSpaceRo.name ?? 'Space';
@@ -112,6 +123,11 @@ export class UserService {
         createdBy: userId,
       },
     });
+    // Awaited so synchronous listeners write within the caller's transaction.
+    await this.eventEmitterService.emitAsync(
+      Events.SPACE_SIGNUP_CREATE,
+      new SpaceSignupCreateEvent(space.id, userId)
+    );
     return space;
   }
 
@@ -145,7 +161,7 @@ export class UserService {
     const origin = this.cls.get('origin');
     const attribution = {
       ...(via ? { via } : {}),
-      ...(this.cls.get('signupAttribution') ?? {}),
+      ...this.cls.get('signupAttribution'),
       ...(adConsent ? { adConsent } : {}),
       ...(origin?.ip ? { ip: origin.ip } : {}),
       // UA of the signup request — forwarded to ad platforms as a match key.
@@ -580,7 +596,7 @@ export class UserService {
 
       // user exist check
       const existUser = await this.getUserByEmail(email);
-      if (existUser && existUser.isSystem) {
+      if (existUser?.isSystem) {
         throw new CustomHttpException('User is system user', HttpErrorCode.UNAUTHORIZED, {
           localization: {
             i18nKey: 'httpErrors.user.systemUser',

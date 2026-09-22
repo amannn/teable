@@ -1,7 +1,6 @@
 import emojiData from '@emoji-mart/data';
 import EmojiPickerCom from '@emoji-mart/react';
-import { useTheme } from '@teable/next-themes';
-import { Button, cn, Popover, PopoverContent, PopoverTrigger } from '@teable/ui-lib';
+import { useTheme, Button, cn, Popover, PopoverContent, PopoverTrigger } from '@teable/ui-lib';
 import { useTranslation } from 'next-i18next';
 import type { CSSProperties, FC, PropsWithChildren } from 'react';
 import { useEffect, useRef, useState } from 'react';
@@ -56,7 +55,7 @@ export const EmojiPicker: FC<PropsWithChildren<IEmojiPicker>> = (props) => {
       // the search row, whose width is not affected by the reserved margin.
       if (!shadowRoot.querySelector('style[data-remove-reserve]')) {
         const style = document.createElement('style');
-        style.setAttribute('data-remove-reserve', '');
+        style.dataset.removeReserve = '';
         style.textContent = `.search { margin-inline-end: ${buttonWidth + 8}px; }`;
         shadowRoot.appendChild(style);
       }

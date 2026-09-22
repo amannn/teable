@@ -7,7 +7,7 @@ import { AuthConfig, IAuthConfig } from '../../../configs/auth.config';
 import type { ISessionData } from '../../../types/session';
 import { second } from '../../../utils/second';
 
-const SESSION_STORE_KEYS = ['passport', 'cookie'] as const;
+const SESSION_STORE_KEYS = ['passport', 'cookie', 'client'] as const;
 
 @Injectable()
 export class SessionStoreService extends Store {
@@ -85,7 +85,11 @@ export class SessionStoreService extends Store {
     return session;
   }
 
-  async get(
+  get(...args: Parameters<SessionStoreService['getAsync']>): void {
+    this.getAsync(...args).catch((error) => this.logger.error(error));
+  }
+
+  async getAsync(
     sid: string,
     callback: (err: unknown, session?: ISessionData | null | undefined) => void
   ): Promise<void> {
@@ -97,7 +101,15 @@ export class SessionStoreService extends Store {
     }
   }
 
-  async set(sid: string, session: ISessionData, callback?: ((err?: unknown) => void) | undefined) {
+  set(...args: Parameters<SessionStoreService['setAsync']>): void {
+    this.setAsync(...args).catch((error) => this.logger.error(error));
+  }
+
+  async setAsync(
+    sid: string,
+    session: ISessionData,
+    callback?: ((err?: unknown) => void) | undefined
+  ) {
     try {
       // Avoid redundant keys on req.session objects
       await this.setCache(sid, pick(session, SESSION_STORE_KEYS));
@@ -107,7 +119,11 @@ export class SessionStoreService extends Store {
     }
   }
 
-  async destroy(sid: string, callback?: ((err?: unknown) => void) | undefined) {
+  destroy(...args: Parameters<SessionStoreService['destroyAsync']>): void {
+    this.destroyAsync(...args).catch((error) => this.logger.error(error));
+  }
+
+  async destroyAsync(sid: string, callback?: ((err?: unknown) => void) | undefined) {
     try {
       await this.cacheService.del(`auth:session-store:${sid}`);
       callback?.();
@@ -116,7 +132,11 @@ export class SessionStoreService extends Store {
     }
   }
 
-  async touch(
+  touch(...args: Parameters<SessionStoreService['touchAsync']>): void {
+    this.touchAsync(...args).catch((error) => this.logger.error(error));
+  }
+
+  async touchAsync(
     sid: string,
     session: ISessionData,
     callback?: ((err?: unknown) => void) | undefined
@@ -142,7 +162,11 @@ export class SessionStoreService extends Store {
   private sessionRenewedAtSec(session: ISessionData): number {
     const expires = session.cookie?.expires;
     const expiresMs =
-      expires instanceof Date ? expires.getTime() : expires ? new Date(expires).getTime() : NaN;
+      expires instanceof Date
+        ? expires.getTime()
+        : expires
+          ? new Date(expires).getTime()
+          : Number.NaN;
     if (!Number.isFinite(expiresMs)) {
       return Math.floor(Date.now() / 1000);
     }

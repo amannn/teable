@@ -1,5 +1,5 @@
 /* eslint-disable sonarjs/no-duplicate-string */
-import { join } from 'path';
+import { join } from 'node:path';
 import { Injectable, Optional } from '@nestjs/common';
 import type { IRole } from '@teable/core';
 import {
@@ -30,7 +30,7 @@ import {
   UploadType,
 } from '@teable/openapi';
 import { Knex } from 'knex';
-import { keyBy, map, uniq } from 'lodash';
+import { keyBy, map } from 'lodash';
 import { InjectModel } from 'nest-knexjs';
 import { ClsService } from 'nestjs-cls';
 import { ThresholdConfig, IThresholdConfig } from '../../configs/threshold.config';
@@ -42,6 +42,7 @@ import { generateIntegrationCacheKey } from '../../performance-cache/generate-ke
 import type { IClsStore } from '../../types/cls';
 import { decryptAiConfigSecrets, encryptAiConfigSecrets } from '../../utils/ai-config-encryption';
 import { AVATAR_OUTPUT_MIMETYPE, AVATAR_SIZE, cropSquareAvatarImage } from '../../utils/avatar';
+import { assertUniqueProviderModels } from '../ai/ai.service';
 import StorageAdapter from '../attachments/plugins/adapter';
 import { InjectStorageAdapter } from '../attachments/plugins/storage';
 import { getPublicFullStorageUrl } from '../attachments/plugins/utils';
@@ -584,15 +585,17 @@ export class SpaceService {
       .map((row) => row.created_by)
       .filter((id): id is string => id !== null);
 
-    const spaceIdsForBases = uniq(
-      resultsToReturn
-        .filter((row) => row.type === ResourceType.Base)
-        .map((row) => baseMap[row.base_id].spaceId)
-    );
+    const spaceIdsForBases = [
+      ...new Set(
+        resultsToReturn
+          .filter((row) => row.type === ResourceType.Base)
+          .map((row) => baseMap[row.base_id].spaceId)
+      ),
+    ];
     const { spaceOwnerMap } =
       await this.collaboratorService.buildSpaceOwnerContext(spaceIdsForBases);
 
-    const allUserIds = uniq([...userIds, ...spaceOwnerMap.values()]);
+    const allUserIds = [...new Set([...userIds, ...spaceOwnerMap.values()])];
     const userList = await this.prismaService.user.findMany({
       where: { id: { in: allUserIds } },
       select: { id: true, name: true, avatar: true },
@@ -638,34 +641,79 @@ export class SpaceService {
     return { list, total, nextCursor };
   }
 
-  async permanentDeleteSpace(spaceId: string, ignorePermissionCheck: boolean = false) {
-    await this.assertSpaceWritable(spaceId);
+  async permanentDeleteSpace(
+    spaceId: string,
+    ignorePermissionCheck: boolean = false,
+    options?: { force?: boolean }
+  ) {
+    if (options?.force) {
+      await this.spaceDataDbMigrationGuard?.assertSpaceWritable(spaceId, { metadataOnly: true });
+    } else {
+      await this.assertSpaceWritable(spaceId);
+    }
+    if (options?.force && ignorePermissionCheck) {
+      throw new CustomHttpException(
+        'Force removal requires explicit user authorization',
+        HttpErrorCode.VALIDATION_ERROR
+      );
+    }
     if (!ignorePermissionCheck) {
       const accessTokenId = this.cls.get('accessTokenId');
       await this.permissionService.validPermissions(spaceId, ['space|delete'], accessTokenId, true);
     }
 
-    await this.prismaService.space
-      .findUniqueOrThrow({
-        where: { id: spaceId },
-      })
-      .catch(() => {
-        throw new CustomHttpException('Space not found', HttpErrorCode.NOT_FOUND, {
-          localization: {
-            i18nKey: 'httpErrors.space.notFound',
-          },
+    if (!options?.force) {
+      await this.prismaService.space
+        .findUniqueOrThrow({
+          where: { id: spaceId },
+        })
+        .catch(() => {
+          throw new CustomHttpException('Space not found', HttpErrorCode.NOT_FOUND, {
+            localization: {
+              i18nKey: 'httpErrors.space.notFound',
+            },
+          });
         });
-      });
+    }
 
     await this.prismaService.$tx(
       async (prisma) => {
+        if (options?.force) {
+          const space = await prisma.space.findUnique({
+            where: { id: spaceId },
+            select: {
+              deletedTime: true,
+              dataDbBinding: { select: { mode: true, dataDbConnectionId: true } },
+            },
+          });
+          if (!space) {
+            throw new CustomHttpException('Space not found', HttpErrorCode.NOT_FOUND, {
+              localization: { i18nKey: 'httpErrors.space.notFound' },
+            });
+          }
+          if (
+            !space.deletedTime ||
+            space.dataDbBinding?.mode !== 'byodb' ||
+            !space.dataDbBinding.dataDbConnectionId
+          ) {
+            throw new CustomHttpException(
+              'Only deleted BYODB spaces can be force removed',
+              HttpErrorCode.VALIDATION_ERROR
+            );
+          }
+        }
+
         const bases = await prisma.base.findMany({
           where: { spaceId },
           select: { id: true },
         });
 
         for (const { id } of bases) {
-          await this.baseService.permanentDeleteBase(id, ignorePermissionCheck);
+          await this.baseService.permanentDeleteBase(
+            id,
+            ignorePermissionCheck,
+            options?.force ? { skipExternalDataDbCleanup: true } : undefined
+          );
         }
 
         await this.cleanSpaceRelatedData(spaceId);
@@ -767,6 +815,7 @@ export class SpaceService {
 
       if (!aiIntegration) {
         const nextConfig = normalizeSpaceAIIntegrationConfig(config);
+        assertUniqueProviderModels(nextConfig.llmProviders);
         const created = await this.prismaService.integration.create({
           data: {
             id: generateIntegrationId(),
@@ -790,6 +839,7 @@ export class SpaceService {
         ...config,
         llmProviders: [...originalConfig.llmProviders, ...config.llmProviders],
       });
+      assertUniqueProviderModels(nextConfig.llmProviders);
 
       const updated = await this.prismaService.integration.update({
         where: { id },

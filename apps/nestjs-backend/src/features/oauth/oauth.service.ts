@@ -64,7 +64,7 @@ export class OAuthService {
     );
   }
 
-  private getSecrets = async (clientId: string) => {
+  private readonly getSecrets = async (clientId: string) => {
     const secrets = await this.prismaService.oAuthAppSecret.findMany({
       where: {
         clientId,
@@ -152,7 +152,7 @@ export class OAuthService {
     );
   }
 
-  private validateOwnership = async (clientId: string) => {
+  private readonly validateOwnership = async (clientId: string) => {
     const app = await this.prismaService.oAuthApp.findUnique({
       where: {
         clientId,
@@ -241,7 +241,7 @@ export class OAuthService {
     const secret = getRandomString(40).toLocaleLowerCase();
     const hashedSecret = await bcrypt.hash(secret, 10);
 
-    const sensitivePart = secret.slice(0, secret.length - 10);
+    const sensitivePart = secret.slice(0, -10);
     const maskedSecret = secret.slice(0).replace(sensitivePart, '*'.repeat(sensitivePart.length));
 
     const res = await this.prismaService.oAuthAppSecret.create({

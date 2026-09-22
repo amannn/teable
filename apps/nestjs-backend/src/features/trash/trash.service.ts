@@ -3,8 +3,9 @@ import { Injectable, Optional, ServiceUnavailableException } from '@nestjs/commo
 import type { FieldType, IFieldVo, IRecord } from '@teable/core';
 import { HttpErrorCode, IdPrefix, Role } from '@teable/core';
 import type { DataPrismaService } from '@teable/db-data-prisma';
-import { PrismaService, type Prisma } from '@teable/db-main-prisma';
+import { PrismaService } from '@teable/db-main-prisma';
 import type {
+  IDeleteTrashQuery,
   IGetTrashItemRecordsQuery,
   IGetTrashItemRecordsVo,
   IRestoreFieldTrashStreamEvent,
@@ -436,6 +437,15 @@ export class TrashService {
       where: { resourceId: { in: spaceIds } },
       orderBy: { deletedTime: 'desc' },
     });
+    const byodbBindings = await this.prismaService.spaceDataDbBinding.findMany({
+      where: {
+        spaceId: { in: list.map(({ resourceId }) => resourceId) },
+        mode: 'byodb',
+        dataDbConnectionId: { not: null },
+      },
+      select: { spaceId: true },
+    });
+    const byodbSpaceIds = new Set(byodbBindings.map(({ spaceId }) => spaceId));
 
     const trashItems: ITrashItemVo[] = [];
     const deletedBySet: Set<string> = new Set();
@@ -450,6 +460,7 @@ export class TrashService {
         resourceType: resourceType as TrashType,
         deletedTime: deletedTime.toISOString(),
         deletedBy,
+        isByodb: byodbSpaceIds.has(resourceId),
       });
       const { name, avatar } = spaceIdMap[resourceId];
       resourceMap[resourceId] = {
@@ -1321,7 +1332,7 @@ export class TrashService {
     const accessTokenId = this.cls.get('accessTokenId');
     await this.permissionService.validPermissions(
       baseId,
-      ['table|delete', 'app|delete', 'automation|delete'],
+      ['table|delete', 'app|delete', 'automation|delete', 'routine|delete'],
       accessTokenId,
       true
     );
@@ -1392,7 +1403,7 @@ export class TrashService {
 
     if (trashedSpace != null) {
       throw new CustomHttpException(
-        'Unable to restore this base because its parent space is also trashed',
+        'Unable to restore this project because its parent space is also trashed',
         HttpErrorCode.VALIDATION_ERROR,
         {
           localization: {
@@ -1627,10 +1638,7 @@ export class TrashService {
       case TableTrashType.Field:
         return await this.restoreFieldTableResourceV2(trashId, routedTableId);
       case TableTrashType.Record:
-        for await (const event of await this.restoreRecordTableResourceV2Stream(
-          trashId,
-          routedTableId
-        )) {
+        for await (const event of this.restoreRecordTableResourceV2Stream(trashId, routedTableId)) {
           if (event.id === 'error') {
             throw new CustomHttpException(event.message, HttpErrorCode.INTERNAL_SERVER_ERROR);
           }
@@ -2252,7 +2260,7 @@ export class TrashService {
     const accessTokenId = this.cls.get('accessTokenId');
     await this.permissionService.validPermissions(
       resourceId,
-      ['table|delete', 'app|delete', 'automation|delete'],
+      ['table|delete', 'app|delete', 'automation|delete', 'routine|delete'],
       accessTokenId,
       true
     );
@@ -2381,7 +2389,33 @@ export class TrashService {
     );
   }
 
-  async delete(trashId: string, ignorePermissionCheck = false): Promise<void> {
+  async delete(
+    trashId: string,
+    ignorePermissionCheck = false,
+    query?: IDeleteTrashQuery
+  ): Promise<void> {
+    if (query?.force) {
+      if (ignorePermissionCheck) {
+        throw new CustomHttpException(
+          'Force removal requires explicit user authorization',
+          HttpErrorCode.VALIDATION_ERROR
+        );
+      }
+      const trash = await this.prismaService.trash.findUnique({ where: { id: trashId } });
+      if (!trash) {
+        throw new CustomHttpException(`The trash ${trashId} not found`, HttpErrorCode.NOT_FOUND, {
+          localization: { i18nKey: 'httpErrors.trash.notFound' },
+        });
+      }
+      if (trash.resourceType !== TrashType.Space) {
+        throw new CustomHttpException(
+          'Only deleted BYODB spaces can be force removed',
+          HttpErrorCode.VALIDATION_ERROR
+        );
+      }
+      return this.spaceService.permanentDeleteSpace(trash.resourceId, false, { force: true });
+    }
+
     const trash = await this.prismaService.trash
       .findUniqueOrThrow({
         where: { id: trashId },
@@ -2423,7 +2457,7 @@ export class TrashService {
         const baseId = parentId ?? '';
         if (!baseId) {
           throw new CustomHttpException(
-            'Base ID is required for deleting table resources',
+            'Project ID is required for deleting table resources',
             HttpErrorCode.VALIDATION_ERROR,
             {
               localization: {

@@ -43,7 +43,6 @@ import { CustomHttpException } from '../../../custom.exception';
 import { InjectDbProvider } from '../../../db-provider/db.provider';
 import { IDbProvider } from '../../../db-provider/db.provider.interface';
 import { EventEmitterService } from '../../../event-emitter/event-emitter.service';
-import { Events } from '../../../event-emitter/events';
 import type { IDataDbRoutingOptions } from '../../../global/data-db-client-manager.service';
 import { handleBestEffortDataDbDropError } from '../../../global/data-db-runtime-error';
 import { DatabaseRouter } from '../../../global/database-router.service';
@@ -70,7 +69,7 @@ import { TableMutationCacheInvalidator } from './table-mutation-cache-invalidato
 
 @Injectable()
 export class TableOpenApiService {
-  private logger = new Logger(TableOpenApiService.name);
+  private readonly logger = new Logger(TableOpenApiService.name);
   constructor(
     private readonly prismaService: PrismaService,
     private readonly databaseRouter: DatabaseRouter,
@@ -308,7 +307,7 @@ export class TableOpenApiService {
         // (template/import/AI) that don't go through the prepareCreateTableRo pipe.
         if (
           tableRo.fields.length &&
-          !tableRo.fields.find((field) => (field as IFieldVo).isPrimary)
+          !tableRo.fields.some((field) => (field as IFieldVo).isPrimary)
         ) {
           (tableRo.fields[0] as IFieldVo).isPrimary = true;
         }
@@ -326,7 +325,7 @@ export class TableOpenApiService {
 
         // Maintain original field order from input to ensure consistent API response
         const fieldIdOrder = new Map(preparedFields.map((f, i) => [f.id, i]));
-        const fieldVos = allFieldVos.sort((a, b) => {
+        const fieldVos = [...allFieldVos].sort((a, b) => {
           const orderA = fieldIdOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER;
           const orderB = fieldIdOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER;
           return orderA - orderB;
@@ -581,7 +580,7 @@ export class TableOpenApiService {
     });
     for (const table of tables) {
       if (!table.deletedTime) {
-        await this.batchService.saveRawOps(table.baseId, RawOpType.Del, IdPrefix.Table, [
+        this.batchService.saveRawOps(table.baseId, RawOpType.Del, IdPrefix.Table, [
           { docId: table.id, version: table.version },
         ]);
       }
@@ -646,8 +645,12 @@ export class TableOpenApiService {
   }
 
   async cleanReferenceFieldIds(tableIds: string[]) {
+    // Every dependency edge that touches a dropped table dangles once its field rows go,
+    // so the endpoint list must not be pre-filtered by type: a lookup field keeps only its
+    // inner type, which hid a number-typed lookup and its plain source from a
+    // Link/Formula filter and left the edge behind after a permanent wipe (T7365).
     const fields = await this.prismaService.txClient().field.findMany({
-      where: { tableId: { in: tableIds }, type: { in: [FieldType.Link, FieldType.Formula] } },
+      where: { tableId: { in: tableIds } },
       select: { id: true },
     });
     const fieldIds = fields.map((field) => field.id);
@@ -659,7 +662,8 @@ export class TableOpenApiService {
   async cleanTablesRelatedData(
     baseId: string,
     tableIds: string[],
-    routingOptions?: IDataDbRoutingOptions
+    routingOptions?: IDataDbRoutingOptions,
+    options?: { skipExternalDataDbCleanup?: boolean }
   ) {
     const metaPrisma = this.prismaService.txClient();
 
@@ -670,6 +674,14 @@ export class TableOpenApiService {
 
     // delete view for table
     await metaPrisma.view.deleteMany({
+      where: { tableId: { in: tableIds } },
+    });
+
+    // comments live on the meta DB keyed by table id, with no cascade from tableMeta
+    await metaPrisma.comment.deleteMany({
+      where: { tableId: { in: tableIds } },
+    });
+    await metaPrisma.commentSubscription.deleteMany({
       where: { tableId: { in: tableIds } },
     });
 
@@ -692,40 +704,48 @@ export class TableOpenApiService {
       where: { id: { in: tableIds } },
     });
 
-    // record history and trash snapshots live with the physical record tables on the data DB.
-    // Nested so one swallowed purge (a relation the bound database never had) cannot skip the
-    // others and orphan their rows, while a gone database still skips all three.
-    const bestEffort = async (target: string, purge: () => Promise<unknown>) => {
-      try {
-        await purge();
-      } catch (error) {
-        handleBestEffortDataDbDropError({
-          error,
-          isMetaFallback: await this.databaseRouter.isMetaFallbackForBase(baseId, routingOptions),
-          logger: this.logger,
-          target,
-        });
-      }
-    };
-    const tables = tableIds.join(', ');
-    await bestEffort(`data database for base ${baseId}`, async () => {
-      const routedDataPrisma = await this.databaseRouter.dataPrismaForBase(baseId, routingOptions);
-      const dataPrisma =
-        'txClient' in routedDataPrisma && typeof routedDataPrisma.txClient === 'function'
-          ? routedDataPrisma.txClient()
-          : routedDataPrisma;
-      const where = { tableId: { in: tableIds } };
+    // A validated forced BYODB space removal leaves all external physical data behind,
+    // including history/trash. Never resolve that client: resolution may migrate/connect.
+    if (!options?.skipExternalDataDbCleanup) {
+      // Nested so a missing bound relation does not prevent purging the others.
+      const bestEffort = async (target: string, purge: () => Promise<unknown>) => {
+        try {
+          await purge();
+        } catch (error) {
+          handleBestEffortDataDbDropError({
+            error,
+            isMetaFallback: await this.databaseRouter.isMetaFallbackForBase(baseId, routingOptions),
+            logger: this.logger,
+            target,
+          });
+        }
+      };
+      const tables = tableIds.join(', ');
+      await bestEffort(`data database for base ${baseId}`, async () => {
+        const routedDataPrisma = await this.databaseRouter.dataPrismaForBase(
+          baseId,
+          routingOptions
+        );
+        const dataPrisma =
+          'txClient' in routedDataPrisma && typeof routedDataPrisma.txClient === 'function'
+            ? routedDataPrisma.txClient()
+            : routedDataPrisma;
+        const where = { tableId: { in: tableIds } };
 
-      await bestEffort(`record history for tables ${tables}`, () =>
-        dataPrisma.recordHistory.deleteMany({ where })
-      );
-      await bestEffort(`table trash for tables ${tables}`, () =>
-        dataPrisma.tableTrash.deleteMany({ where })
-      );
-      await bestEffort(`record trash for tables ${tables}`, () =>
-        dataPrisma.recordTrash.deleteMany({ where })
-      );
-    });
+        await bestEffort(`attachment refs for tables ${tables}`, () =>
+          dataPrisma.attachmentsTable.deleteMany({ where })
+        );
+        await bestEffort(`record history for tables ${tables}`, () =>
+          dataPrisma.recordHistory.deleteMany({ where })
+        );
+        await bestEffort(`table trash for tables ${tables}`, () =>
+          dataPrisma.tableTrash.deleteMany({ where })
+        );
+        await bestEffort(`record trash for tables ${tables}`, () =>
+          dataPrisma.recordTrash.deleteMany({ where })
+        );
+      });
+    }
 
     // clean trash for table
     await metaPrisma.trash.deleteMany({

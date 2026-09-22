@@ -102,6 +102,19 @@ describe('AuditScope', () => {
     );
   });
 
+  it('emitAtomic() names the action it skips when no resourceId can be resolved', async () => {
+    const emitAsync = vi.fn().mockResolvedValue([]);
+    const service = makeService({ emitAsync });
+    const warn = vi.fn();
+    (service as unknown as { logger: { warn: typeof warn } }).logger = { warn };
+    await runInCls(async () => {
+      await service.emitAtomic({ action: 'table|delete' as IAuditAction });
+    });
+    expect(emitAsync).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('action=table|delete'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('operation=absent'));
+  });
+
   it('emitAtomic() ignores reserved keys from payload extras', async () => {
     const emitAsync = vi.fn().mockResolvedValue([]);
     const service = makeService({ emitAsync } as Partial<EventEmitter2>);

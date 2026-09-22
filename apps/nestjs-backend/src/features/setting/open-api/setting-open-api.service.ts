@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 /* eslint-disable sonarjs/no-duplicate-string */
-import { readFile } from 'fs/promises';
-import { join, resolve } from 'path';
+import { readFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import type { OpenAIProvider } from '@ai-sdk/openai';
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpErrorCode } from '@teable/core';
@@ -43,7 +43,6 @@ import {
 import { createGateway, generateText, tool, generateImage } from 'ai';
 import type { LanguageModel, TextPart, FilePart } from 'ai';
 import axios from 'axios';
-import { uniq } from 'lodash';
 import { ClsService } from 'nestjs-cls';
 import { z } from 'zod';
 import { BaseConfig, IBaseConfig } from '../../../configs/base.config';
@@ -51,7 +50,7 @@ import { type IStorageConfig, StorageConfig } from '../../../configs/storage';
 import { CustomHttpException } from '../../../custom.exception';
 import type { IClsStore } from '../../../types/cls';
 import { resolveBuildVersion } from '../../../utils/build-version';
-import { INSTANCE_PROVIDER_NAME } from '../../ai/ai.service';
+import { assertUniqueProviderModels, INSTANCE_PROVIDER_NAME } from '../../ai/ai.service';
 import { getAdaptedProviderOptions, modelProviders } from '../../ai/util';
 import { AttachmentsStorageService } from '../../attachments/attachments-storage.service';
 import StorageAdapter from '../../attachments/plugins/adapter';
@@ -129,6 +128,7 @@ export class SettingOpenApiService {
     // allowing a simple suffix check to distinguish instance vs BYOK models.
     if (updateSettingRo.aiConfig) {
       this.normalizeInstanceProviderNames(updateSettingRo.aiConfig as Record<string, unknown>);
+      assertUniqueProviderModels(updateSettingRo.aiConfig.llmProviders);
     }
     return this.settingService.updateSetting(updateSettingRo);
   }
@@ -137,11 +137,13 @@ export class SettingOpenApiService {
     const { aiConfig } = await this.settingService.getSetting([SettingKey.AI_CONFIG]);
     const patch = clearUndefinedPatchValues(updateAiConfigRo.patch);
     const nextAiConfig = {
-      ...(aiConfig ?? {}),
+      ...aiConfig,
       ...patch,
     } as IAIConfig;
+    nextAiConfig.llmProviders ??= [];
 
     this.normalizeInstanceProviderNames(nextAiConfig as Record<string, unknown>);
+    assertUniqueProviderModels(nextAiConfig.llmProviders);
 
     await this.settingService.updateSetting({
       [SettingKey.AI_CONFIG]: nextAiConfig,
@@ -158,7 +160,7 @@ export class SettingOpenApiService {
     const { appConfig } = await this.settingService.getSetting([SettingKey.APP_CONFIG]);
     const patch = clearUndefinedPatchValues(updateAppConfigRo.patch);
     const nextAppConfig = {
-      ...(appConfig ?? {}),
+      ...appConfig,
       ...patch,
     } as IAppConfig;
 
@@ -188,7 +190,7 @@ export class SettingOpenApiService {
     }
     const chatModel = aiConfig.chatModel as Record<string, string | undefined> | undefined;
     if (chatModel) {
-      for (const tier of ['lg', 'md', 'sm']) {
+      for (const tier of ['xl', 'lg', 'md', 'sm']) {
         const key = chatModel[tier];
         if (key && key.includes('@')) {
           const parts = key.split('@');
@@ -279,8 +281,6 @@ export class SettingOpenApiService {
 
   private getAvailableIntegrationProviders(): string[] {
     return [
-      ...(process.env.GMAIL_CLIENT_ID ? ['gmail'] : []),
-      ...(process.env.OUTLOOK_CLIENT_ID ? ['outlook'] : []),
       ...(process.env.AIRTABLE_CLIENT_ID ? ['airtable'] : []),
       // The OAuth client is shared with Google sign-in, so the Picker key is
       // the variable that actually expresses "this instance opted into Sheets
@@ -379,7 +379,7 @@ export class SettingOpenApiService {
       );
 
       // Strict validation: expect exactly "K" or "k" in quotes
-      const quotedLetterMatch = responseText.match(/"([^"]+)"/);
+      const quotedLetterMatch = /"([^"]+)"/.exec(responseText);
       const letterInQuotes = quotedLetterMatch ? quotedLetterMatch[1].toLowerCase() : null;
       const containsExpectedInQuotes = letterInQuotes === expectedLetter;
 
@@ -553,7 +553,7 @@ export class SettingOpenApiService {
       return {};
     }
 
-    const testAbilities = uniq(ability);
+    const testAbilities = [...new Set(ability)];
     const result: IChatModelAbility = {};
 
     // Run all tests in parallel for better performance

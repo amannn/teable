@@ -96,7 +96,17 @@ export class AuditScope {
   async emitAtomic(input: IEmitAtomicAuditInput): Promise<void> {
     const operation = this.cls.get('audit');
     const resourceId = input.resourceId ?? operation?.resourceId;
-    if (!resourceId) return;
+    if (!resourceId) {
+      // Dropping an audit record silently is indistinguishable from never having asked for one:
+      // the row is simply absent later, with nothing to read. Say which action went unrecorded and
+      // whether an operation context was there at all, so the next occurrence is traceable.
+      this.logger.warn(
+        `audit emit skipped: no resourceId for action=${input.action}, operation=${
+          operation ? 'present' : 'absent'
+        }`
+      );
+      return;
+    }
 
     const {
       action: _payloadAction,
@@ -112,7 +122,7 @@ export class AuditScope {
         ? operation.rootAction
         : undefined;
     const mergedParams = input.params
-      ? { ...(operation?.params ?? {}), ...input.params }
+      ? { ...operation?.params, ...input.params }
       : operation?.params;
 
     await this.scheduleEmit({

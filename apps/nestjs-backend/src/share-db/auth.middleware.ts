@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import url from 'url';
+import url from 'node:url';
 import type ShareDBClass from 'sharedb';
 import type { SessionHandleService } from '../features/auth/session/session-handle.service';
 

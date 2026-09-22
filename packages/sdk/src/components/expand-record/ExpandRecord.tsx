@@ -115,11 +115,11 @@ export const ExpandRecord = (props: IExpandRecordProps) => {
   );
 
   const nextRecordIndex = useMemo(() => {
-    return recordIds?.length ? recordIds.findIndex((id) => recordId === id) + 1 : -1;
+    return recordIds?.length ? recordIds.indexOf(recordId) + 1 : -1;
   }, [recordId, recordIds]);
 
   const prevRecordIndex = useMemo(() => {
-    return recordIds?.length ? recordIds.findIndex((id) => recordId === id) - 1 : -1;
+    return recordIds?.length ? recordIds.indexOf(recordId) - 1 : -1;
   }, [recordId, recordIds]);
 
   const onChange = useCallback(

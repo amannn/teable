@@ -517,7 +517,7 @@ const matchesIndexColumn = (
 ): boolean => {
   if (!indexColumn || !fieldDbName) return false;
   const lowercaseField = fieldDbName.toLowerCase();
-  const quotedColumn = `"${lowercaseField.replace(/"/g, '""')}"`;
+  const quotedColumn = `"${lowercaseField.replaceAll('"', '""')}"`;
   return indexColumn.startsWith(quotedColumn) || indexColumn.startsWith(lowercaseField);
 };
 
@@ -526,9 +526,9 @@ const containsColumnReference = (
   fieldDbName: string
 ): boolean => {
   const lowercaseField = fieldDbName.toLowerCase();
-  const quotedColumn = `"${lowercaseField.replace(/"/g, '""')}"`;
+  const quotedColumn = `"${lowercaseField.replaceAll('"', '""')}"`;
   if (lowercaseIndexDefinition.includes(quotedColumn)) return true;
-  return new RegExp(`(^|[\\s(,])${escapeRegExp(lowercaseField)}([\\s),]|$)`).test(
+  return new RegExp(String.raw`(^|[\s(,])${escapeRegExp(lowercaseField)}([\s),]|$)`).test(
     lowercaseIndexDefinition
   );
 };

@@ -13,7 +13,6 @@ import type {
   IUpdateCommentRo,
   IGetCommentListQueryRo,
   ICommentContent,
-  IGetRecordsRo,
   IParagraphCommentContent,
   ICommentReaction,
 } from '@teable/openapi';
@@ -37,7 +36,7 @@ import { RecordService } from '../record/record.service';
 
 @Injectable()
 export class CommentOpenApiService {
-  private logger = new Logger(CommentOpenApiService.name);
+  private readonly logger = new Logger(CommentOpenApiService.name);
   constructor(
     private readonly notificationService: NotificationService,
     private readonly recordService: RecordService,
@@ -544,7 +543,8 @@ export class CommentOpenApiService {
       if (index > -1) {
         emojis.splice(index, 1, {
           reaction,
-          user: uniq([...emojis[index].user, this.cls.get('user.id')]),
+          // Sonar S8907: lodash's uniq typing keeps this union assignable to the reaction user list
+          user: uniq([...emojis[index].user, this.cls.get('user.id')]), // NOSONAR typescript:S8907
         });
       } else {
         emojis.push({
@@ -586,7 +586,7 @@ export class CommentOpenApiService {
   async getSubscribeDetail(tableId: string, recordId: string) {
     return this.prismaService.commentSubscription.findUnique({
       where: {
-        // eslint-disable-next-line
+        // eslint-disable-next-line @typescript-eslint/naming-convention
         tableId_recordId: {
           tableId,
           recordId,
@@ -613,7 +613,7 @@ export class CommentOpenApiService {
   async unsubscribeComment(tableId: string, recordId: string) {
     await this.prismaService.commentSubscription.delete({
       where: {
-        // eslint-disable-next-line
+        // eslint-disable-next-line @typescript-eslint/naming-convention
         tableId_recordId: {
           tableId,
           recordId,
@@ -622,15 +622,16 @@ export class CommentOpenApiService {
     });
   }
 
-  async getTableCommentCount(tableId: string, query: IGetRecordsRo) {
-    const docResult = await this.recordService.getDocIdsByQuery(tableId, query, true);
-    const recordsId = docResult.ids;
+  async getTableCommentCount(tableId: string, recordIds: string[]) {
+    if (!recordIds.length) {
+      return [];
+    }
 
     const result = await this.prismaService.comment.groupBy({
       by: ['recordId'],
       where: {
         recordId: {
-          in: recordsId,
+          in: recordIds,
         },
         tableId,
         deletedTime: null,

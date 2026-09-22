@@ -48,6 +48,8 @@ import {
   LinkForeignTableReferenceVisitor,
   type LinkForeignTableReference,
 } from './fields/visitors/LinkForeignTableReferenceVisitor';
+import type { ITableReadModel } from './ITableReadModel';
+import { isTableSearchIndex, type ITableSearchIndex } from './ITableSearchIndex';
 import {
   applyViewManualSort as applyViewManualSortMethod,
   type ApplyViewManualSortMethodResult,
@@ -109,6 +111,10 @@ import {
   type DuplicateViewMethodOptions,
   type DuplicateViewMethodResult,
 } from './methods/duplicateView';
+import {
+  fieldFilterLinkScope as fieldFilterLinkScopeMethod,
+  type FieldFilterLinkScope,
+} from './methods/fieldFilterLinkScope';
 import {
   getOrderedVisibleFieldIds as getOrderedVisibleFieldIdsMethod,
   type GetOrderedVisibleFieldIdsOptions,
@@ -185,10 +191,6 @@ import {
   type UpdateViewSortMethodResult,
 } from './methods/updateViewSort';
 import { validateFormSubmission as validateFormSubmissionMethod } from './methods/validateFormSubmission';
-import {
-  fieldFilterLinkScope as fieldFilterLinkScopeMethod,
-  type FieldFilterLinkScope,
-} from './methods/fieldFilterLinkScope';
 import {
   viewFilterLinkReferences as viewFilterLinkReferencesMethod,
   type ViewFilterLinkReference,
@@ -302,8 +304,9 @@ const deriveDbFieldTypeFromResolvedField = (field: Field): string | undefined =>
   }
 };
 
-export class Table extends AggregateRoot<TableId> {
+export class Table extends AggregateRoot<TableId> implements ITableReadModel {
   private dbTableNameValue: DbTableName;
+  private searchIndexValue: ITableSearchIndex | undefined;
 
   private constructor(
     id: TableId,
@@ -379,6 +382,14 @@ export class Table extends AggregateRoot<TableId> {
       const setResult = table.setDbTableName(props.dbTableName);
       if (setResult.isErr()) return err(setResult.error);
     }
+    const dbTableName = props.dbTableName?.value();
+    if (
+      isTableSearchIndex(props.searchIndex) &&
+      dbTableName?.isOk() &&
+      dbTableName.value === props.searchIndex.dbTableName
+    ) {
+      table.searchIndexValue = props.searchIndex;
+    }
 
     return ok(table);
   }
@@ -407,6 +418,10 @@ export class Table extends AggregateRoot<TableId> {
     const valueResult = this.dbTableNameValue.value();
     if (valueResult.isErr()) return err(valueResult.error);
     return ok(this.dbTableNameValue);
+  }
+
+  searchIndex(): ITableSearchIndex | undefined {
+    return this.searchIndexValue;
   }
 
   clone(mapper: ITableMapper): Result<Table, DomainError> {
@@ -958,29 +973,34 @@ export class Table extends AggregateRoot<TableId> {
    * This method is memory-friendly for large record sets:
    * - Lazily processes input records
    * - Yields batches of created records
-   * - Only keeps batchSize records in memory at a time
+   * - Constructs one record batch at a time; emitted domain events live on the aggregate
    * - Stops immediately on first validation error
+   * - Callers drain events per batch, or disable per-record events and publish batch events
    *
    * @param recordsFieldValues - Iterable of field value maps (can be lazy/streaming)
    * @param options - Optional configuration
    * @param options.batchSize - Number of records per batch (default: 500)
+   * @param options.emitRecordCreatedEvents - Disable when the caller publishes batch events
    * @returns Generator yielding Result batches of created records
    *
    * @example
    * ```typescript
-   * // Process 100k records with bounded memory
+   * // Import callers publish complete RecordsBatchCreated events separately.
    * function* generateRecords() {
    *   for (let i = 0; i < 100000; i++) {
    *     yield new Map([['fld123', `Record ${i}`]]);
    *   }
    * }
    *
-   * for (const batchResult of table.createRecordsStream(generateRecords(), { batchSize: 500 })) {
+   * for (const batchResult of table.createRecordsStream(generateRecords(), {
+   *   batchSize: 500,
+   *   emitRecordCreatedEvents: false,
+   * })) {
    *   if (batchResult.isErr()) {
    *     console.error(batchResult.error);
    *     break;
    *   }
-   *   // Process batch of 500 records
+   *   // Persist this batch and publish its event through DomainWriteTransaction.executeStream
    *   await repository.insertMany(batchResult.value);
    * }
    * ```
@@ -1307,6 +1327,7 @@ export class Table extends AggregateRoot<TableId> {
       fields: nextFields,
       views: nextViewsResult.value,
       primaryFieldId: this.primaryFieldIdValue,
+      searchIndex: this.searchIndexValue,
     };
 
     if (this.dbTableNameValue.isRehydrated()) {
@@ -1345,6 +1366,7 @@ export class Table extends AggregateRoot<TableId> {
       fields: this.fieldsValue,
       views: [...this.viewsValue, view],
       primaryFieldId: this.primaryFieldIdValue,
+      searchIndex: this.searchIndexValue,
     };
     if (this.dbTableNameValue.isRehydrated()) props.dbTableName = this.dbTableNameValue;
     return Table.rehydrate(props);
@@ -1378,6 +1400,7 @@ export class Table extends AggregateRoot<TableId> {
       fields: this.fieldsValue,
       views: this.viewsValue.filter((view) => !view.id().equals(viewId)),
       primaryFieldId: this.primaryFieldIdValue,
+      searchIndex: this.searchIndexValue,
     };
     if (this.dbTableNameValue.isRehydrated()) props.dbTableName = this.dbTableNameValue;
     return Table.rehydrate(props);
@@ -1411,6 +1434,7 @@ export class Table extends AggregateRoot<TableId> {
       fields: nextFields,
       views: nextViewsResult.value,
       primaryFieldId: this.primaryFieldIdValue,
+      searchIndex: this.searchIndexValue,
     };
 
     if (this.dbTableNameValue.isRehydrated()) {
@@ -1521,6 +1545,7 @@ export class Table extends AggregateRoot<TableId> {
       fields: nextFields,
       views: this.viewsValue,
       primaryFieldId: this.primaryFieldIdValue,
+      searchIndex: this.searchIndexValue,
     };
 
     if (this.dbTableNameValue.isRehydrated()) {
@@ -1584,6 +1609,7 @@ export class Table extends AggregateRoot<TableId> {
       fields: nextFields,
       views: this.viewsValue,
       primaryFieldId: this.primaryFieldIdValue,
+      searchIndex: this.searchIndexValue,
     };
 
     if (this.dbTableNameValue.isRehydrated()) {
@@ -1720,6 +1746,7 @@ export class Table extends AggregateRoot<TableId> {
       fields: nextFields,
       views: this.viewsValue,
       primaryFieldId: this.primaryFieldIdValue,
+      searchIndex: this.searchIndexValue,
     };
 
     if (this.dbTableNameValue.isRehydrated()) {
@@ -1940,7 +1967,7 @@ export class Table extends AggregateRoot<TableId> {
     }
 
     const hasExplicitHiddenVisibilityConfig = Object.values(currentMeta).some((entry) =>
-      Object.prototype.hasOwnProperty.call(entry, 'hidden')
+      Object.hasOwn(entry, 'hidden')
     );
     if (!hasExplicitHiddenVisibilityConfig) {
       return { ...defaultEntry };

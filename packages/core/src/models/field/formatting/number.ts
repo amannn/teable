@@ -96,7 +96,7 @@ export const parseStringToNumber = (value: string | null, formatting?: INumberFo
   const numberReg = /[^\d.+-]/g;
   const symbolReg = /([+\-.])+/g;
   const numStr = originStr.replace(numberReg, '').replace(symbolReg, '$1');
-  const num = parseFloat(numStr);
+  const num = Number.parseFloat(numStr);
 
   if (Number.isNaN(num)) {
     return null;
